@@ -171,7 +171,7 @@ function view_logs() {
     main_menu
 }
 
-# 查看积分（显示最近10次完整记录）
+# 查看积分（显示最近10次记录）
 function view_points() {
     echo "正在查看当前积分..."
     source /root/.bashrc
@@ -296,7 +296,7 @@ EOL
     main_menu
 }
 
-# 启用每小时积分记录（记录完整输出）
+# 启用每小时积分记录（只保留时间和Points）
 function start_hourly_points_record() {
     echo "启动每小时积分记录..."
     cat > /root/hourly_points.sh << 'EOL'
@@ -304,15 +304,15 @@ function start_hourly_points_record() {
 POINTS_HISTORY_LOG="/root/points_history.log"
 
 if [ ! -f "$POINTS_HISTORY_LOG" ]; then
-    echo "时间,积分详情" > "$POINTS_HISTORY_LOG"
+    echo "时间,Points" > "$POINTS_HISTORY_LOG"
 fi
 
 while true; do
     CURRENT_TIME=$(date '+%Y-%m-%d %H:%M:%S')
-    # 完整记录 aios-cli hive points 的输出
-    CURRENT_POINTS=$(aios-cli hive points || echo "无法获取积分信息")
-    echo "[$CURRENT_TIME] $CURRENT_POINTS" >> "$POINTS_HISTORY_LOG"
-    echo "$CURRENT_TIME: 已记录积分详情"
+    # 只提取 Points 的值
+    CURRENT_POINTS=$(aios-cli hive points | grep "Points" | awk '{print $2}' || echo "无法获取")
+    echo "$CURRENT_TIME,$CURRENT_POINTS" >> "$POINTS_HISTORY_LOG"
+    echo "$CURRENT_TIME: 已记录积分: $CURRENT_POINTS"
     sleep 3600
 done
 EOL
