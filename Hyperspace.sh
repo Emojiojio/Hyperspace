@@ -2,13 +2,13 @@
 
 # 脚本保存路径
 SCRIPT_PATH="$HOME/Hyperspace.sh"
-
+# 积分历史日志文件路径
+POINTS_HISTORY_LOG="/root/points_history.log"
 
 # 检查并安装 screen
 function check_and_install_screen() {
     if ! command -v screen &> /dev/null; then
         echo "screen 未安装，正在安装..."
-        # 直接运行安装命令，无需 sudo
         apt update && apt install -y screen
     else
         echo "screen 已安装。"
@@ -32,9 +32,10 @@ function main_menu() {
         echo "6. 查看使用的私钥"
         echo "7. 查看aios daemon状态"
         echo "8. 启用积分监控"
-        echo "9. 退出脚本"
+        echo "9. 启用每小时积分记录"
+        echo "10. 退出脚本"
         echo "================================================================"
-        read -p "请输入选择 (1/2/3/4/5/6/7/8/9): " choice
+        read -p "请输入选择 (1-10): " choice
 
         case $choice in
             1)  deploy_hyperspace_node ;;
@@ -45,7 +46,8 @@ function main_menu() {
             6)  view_private_key ;;
             7)  view_status ;;
             8)  start_points_monitor ;;
-            9)  exit_script ;;
+            9)  start_hourly_points_record ;;
+            10) exit_script ;;
             *)  echo "无效选择，请重新输入！"; sleep 2 ;;
         esac
     done
@@ -53,34 +55,25 @@ function main_menu() {
 
 # 部署hyperspace节点
 function deploy_hyperspace_node() {
-    # 执行安装命令
     echo "正在执行安装命令：curl https://download.hyper.space/api/install | bash"
     curl https://download.hyper.space/api/install | bash
 
-    # 获取安装后新添加的路径
     NEW_PATH=$(bash -c 'source /root/.bashrc && echo $PATH')
-    
-    # 更新当前shell的PATH
     export PATH="$NEW_PATH"
 
-    # 确保 ~/.local/bin 在 PATH 中
     if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
         export PATH="$HOME/.local/bin:$PATH"
     fi
 
-    # 确保 /root/.aios 在 PATH 中
     if [[ ":$PATH:" != *":/root/.aios:"* ]]; then
         export PATH="/root/.aios:$PATH"
     fi
 
-    # 打印当前 PATH，确保 aios-cli 在其中
     echo "当前 PATH: $PATH"
 
-    # 验证 aios-cli 是否可用
     if ! command -v /root/.aios/aios-cli &> /dev/null; then
         echo "aios-cli 命令未找到，正在重试..."
         sleep 3
-        # 再次尝试更新 PATH
         export PATH="$PATH:/root/.local/bin"
         if ! command -v /root/.aios/aios-cli &> /dev/null; then
             echo "无法找到 aios-cli 命令，请手动运行 'source /root/.bashrc' 后重试"
@@ -89,13 +82,11 @@ function deploy_hyperspace_node() {
         fi
     fi
 
-    # 提示输入屏幕名称，默认值为 'hyper'
     read -p "请输入屏幕名称 (默认值: hyper): " screen_name
     screen_name=${screen_name:-hyper}
     echo "使用的屏幕名称是: $screen_name"
 
-    # 清理已存在的 'hyper' 屏幕会话
-    echo "检查并清理现有的 'hyper' 屏幕会话..."
+    echo "检查并清理现有的 '$screen_name' 屏幕会话..."
     screen -ls | grep "$screen_name" &>/dev/null
     if [ $? -eq 0 ]; then
         echo "找到现有的 '$screen_name' 屏幕会话，正在停止并删除..."
@@ -105,40 +96,27 @@ function deploy_hyperspace_node() {
         echo "没有找到现有的 '$screen_name' 屏幕会话。"
     fi
 
-    # 创建一个新的屏幕会话
     echo "创建一个名为 '$screen_name' 的屏幕会话..."
     screen -S "$screen_name" -dm
 
-    # 在屏幕会话中运行 aios-cli start
     echo "在屏幕会话 '$screen_name' 中运行 'aios-cli start' 命令..."
     screen -S "$screen_name" -X stuff "/root/.aios/aios-cli start\n"
 
-    # 等待几秒钟确保命令执行
     sleep 5
-
-    # 退出屏幕会话
     echo "退出屏幕会话 '$screen_name'..."
     screen -S "$screen_name" -X detach
     sleep 5
 
-    # 打印当前 PATH，确保 aios-cli 在其中
     echo "当前 PATH: $PATH"
 
-    # 提示用户输入私钥并保存为 my.pem 文件
     echo "请输入你的私钥（按 CTRL+D 结束）："
     cat > my.pem
 
-    # 使用 my.pem 文件运行 import-keys 命令
     echo "正在使用 my.pem 文件运行 import-keys 命令..."
-    
-    # 运行 import-keys 命令
     /root/.aios/aios-cli hive import-keys ./my.pem
     sleep 5
 
-    # 定义模型变量
     model="hf:TheBloke/phi-2-GGUF:phi-2.Q4_K_M.gguf"
-
-    # 添加模型并重试
     echo "正在通过命令 '/root/.aios/aios-cli models add' 添加模型..."
     while true; do
         if /root/.aios/aios-cli models add "$model"; then
@@ -150,13 +128,9 @@ function deploy_hyperspace_node() {
         fi
     done
 
-    # 登录并选择等级
     echo "正在登录并选择等级..."
-
-    # 登录到 Hive
     /root/.aios/aios-cli hive login
 
-    # 提示用户选择等级
     echo "请选择等级（1-5）："
     select tier in 1 2 3 4 5; do
         case $tier in
@@ -165,50 +139,60 @@ function deploy_hyperspace_node() {
                 /root/.aios/aios-cli hive select-tier $tier
                 break
                 ;;
-            *)
-                echo "无效的选择，请输入 1 到 5 之间的数字。"
-                ;;
+            *)  echo "无效的选择，请输入 1 到 5 之间的数字。" ;;
         esac
     done
 
-    # 连接到 Hive
     /root/.aios/aios-cli hive connect
     sleep 5
 
-    # 停止 aios-cli 进程
     echo "使用 '/root/.aios/aios-cli kill' 停止 'aios-cli start' 进程..."
     /root/.aios/aios-cli kill
 
-    # 在屏幕会话中运行 aios-cli start，并定向日志文件
-    echo "在屏幕会话 '$screen_name' 中运行 '/root/.aios/aios-cli start --connect'，并将输出定向到 '/root/aios-cli.log'..."
+    echo "在屏幕会话 '$screen_name' 中运行 '/root/.aios/aios-cli start --connect'..."
     screen -S "$screen_name" -X stuff "/root/.aios/aios-cli start --connect >> /root/aios-cli.log 2>&1\n"
 
-    echo "部署hyperspace节点完成，'/root/.aios/aios-cli start --connect' 已在屏幕内运行，系统已恢复到后台。"
-
-    # 提示用户按任意键返回主菜单
+    echo "部署hyperspace节点完成，系统已恢复到后台。"
     read -n 1 -s -r -p "按任意键返回主菜单..."
     main_menu
 }
 
-# 查看积分
-function view_points() {
-    echo "正在查看积分..."
-    source /root/.bashrc
-    aios-cli hive points
-    sleep 5
+# 查看日志
+function view_logs() {
+    echo "正在查看日志..."
+    LOG_FILE="/root/aios-cli.log"
+    if [ -f "$LOG_FILE" ]; then
+        echo "显示日志的最后 200 行:"
+        tail -n 200 "$LOG_FILE"
+    else
+        echo "日志文件不存在: $LOG_FILE"
+    fi
+    read -n 1 -s -r -p "按任意键返回主菜单..."
+    main_menu
 }
 
-# 删除节点（停止节点）
+# 查看积分（修改为显示最近10次记录）
+function view_points() {
+    echo "正在查看当前积分..."
+    source /root/.bashrc
+    aios-cli hive points
+    echo ""
+    echo "积分历史记录保存在: $POINTS_HISTORY_LOG"
+    if [ -f "$POINTS_HISTORY_LOG" ]; then
+        echo "显示最近10次积分记录:"
+        tail -n 10 "$POINTS_HISTORY_LOG"
+    fi
+    sleep 5
+    read -n 1 -s -r -p "按任意键返回主菜单..."
+    main_menu
+}
+
+# 删除节点
 function delete_node() {
     echo "正在使用 'aios-cli kill' 停止节点..."
-
-    # 执行 aios-cli kill 停止节点
     aios-cli kill
     sleep 2
-    
     echo "'aios-cli kill' 执行完成，节点已停止。"
-
-    # 提示用户按任意键返回主菜单
     read -n 1 -s -r -p "按任意键返回主菜单..."
     main_menu
 }
@@ -216,8 +200,6 @@ function delete_node() {
 # 启用日志监控
 function start_log_monitor() {
     echo "启动日志监控..."
-
-    # 创建监控脚本文件
     cat > /root/monitor.sh << 'EOL'
 #!/bin/bash
 LOG_FILE="/root/aios-cli.log"
@@ -227,8 +209,6 @@ MIN_RESTART_INTERVAL=300
 
 while true; do
     current_time=$(date +%s)
-    
-    # 检测到以下几种情况，触发重启
     if (tail -n 4 "$LOG_FILE" | grep -q "Last pong received.*Sending reconnect signal" || \
         tail -n 4 "$LOG_FILE" | grep -q "Failed to authenticate" || \
         tail -n 4 "$LOG_FILE" | grep -q "Failed to connect to Hive" || \
@@ -236,21 +216,13 @@ while true; do
         tail -n 4 "$LOG_FILE" | grep -q "\"message\": \"Internal server error\"" || \
         tail -n 4 "$LOG_FILE" | grep -q "thread 'main' panicked at aios-cli/src/main.rs:181:39: called \`Option::unwrap()\` on a \`None\` value") && \
        [ $((current_time - LAST_RESTART)) -gt $MIN_RESTART_INTERVAL ]; then
-        echo "$(date): 检测到连接问题、认证失败、连接到 Hive 失败、实例已在运行、内部服务器错误或 'Option::unwrap()' 错误，正在重启服务..." >> /root/monitor.log
-        
-        # 先发送 Ctrl+C
+        echo "$(date): 检测到错误，正在重启服务..." >> /root/monitor.log
         screen -S "$SCREEN_NAME" -X stuff $'\003'
         sleep 5
-        
-        # 执行 aios-cli kill
         screen -S "$SCREEN_NAME" -X stuff "aios-cli kill\n"
         sleep 5
-        
         echo "$(date): 清理旧日志..." > "$LOG_FILE"
-        
-        # 重新启动服务
         screen -S "$SCREEN_NAME" -X stuff "aios-cli start --connect >> /root/aios-cli.log 2>&1\n"
-        
         LAST_RESTART=$current_time
         echo "$(date): 服务已重启" >> /root/monitor.log
     fi
@@ -258,85 +230,11 @@ while true; do
 done
 EOL
 
-    # 添加执行权限
     chmod +x /root/monitor.sh
-
-    # 在后台启动监控脚本
     nohup /root/monitor.sh > /root/monitor.log 2>&1 &
-
     echo "日志监控已启动，后台运行中。"
     echo "可以通过查看 /root/monitor.log 来检查监控状态"
     sleep 2
-
-    # 提示用户按任意键返回主菜单
-    read -n 1 -s -r -p "按任意键返回主菜单..."
-    main_menu
-}
-
-# 启用积分监控
-function start_points_monitor() {
-    echo "启动积分监控..."
-
-    # 创建积分监控脚本文件
-    cat > /root/points_monitor.sh << 'EOL'
-#!/bin/bash
-LOG_FILE="/root/aios-cli.log"
-SCREEN_NAME="hyper"
-LAST_POINTS=0
-MIN_RESTART_INTERVAL=300
-
-while true; do
-    CURRENT_POINTS=$(aios-cli hive points | grep -o '[0-9]\+')
-    
-    if [ "$CURRENT_POINTS" -eq "$LAST_POINTS" ]; then
-        echo "$(date): 积分没有增加，正在重启服务..." >> /root/points_monitor.log
-        
-        # 重启服务
-        screen -S "$SCREEN_NAME" -X stuff $'\003'
-        sleep 5
-        screen -S "$SCREEN_NAME" -X stuff "aios-cli kill\n"
-        sleep 5
-        
-        echo "$(date): 清理旧日志..." > "$LOG_FILE"
-        screen -S "$SCREEN_NAME" -X stuff "aios-cli start --connect >> /root/aios-cli.log 2>&1\n"
-        
-        LAST_POINTS=$CURRENT_POINTS
-    else
-        LAST_POINTS=$CURRENT_POINTS
-    fi
-
-    sleep 7200  # 每2小时检查一次积分变化
-done
-EOL
-
-    # 添加执行权限
-    chmod +x /root/points_monitor.sh
-
-    # 在后台启动积分监控脚本
-    nohup /root/points_monitor.sh > /root/points_monitor.log 2>&1 &
-
-    echo "积分监控已启动，后台运行中。"
-    echo "可以通过查看 /root/points_monitor.log 来检查监控状态"
-    sleep 2
-
-    # 提示用户按任意键返回主菜单
-    read -n 1 -s -r -p "按任意键返回主菜单..."
-    main_menu
-}
-
-# 查看日志
-function view_logs() {
-    echo "正在查看日志..."
-    LOG_FILE="/root/aios-cli.log"   # 日志文件路径
-
-    if [ -f "$LOG_FILE" ]; then
-        echo "显示日志的最后 200 行:"
-        tail -n 200 "$LOG_FILE"   # 显示最后 200 行日志
-    else
-        echo "日志文件不存在: $LOG_FILE"
-    fi
-
-    # 提示用户按任意键返回主菜单
     read -n 1 -s -r -p "按任意键返回主菜单..."
     main_menu
 }
@@ -346,8 +244,6 @@ function view_private_key() {
     echo "正在查看使用的私钥..."
     aios-cli hive whoami
     sleep 2
-
-    # 提示用户按任意键返回主菜单
     read -n 1 -s -r -p "按任意键返回主菜单..."
     main_menu
 }
@@ -357,8 +253,73 @@ function view_status() {
     echo "正在查看aios状态..."
     aios-cli status
     sleep 2
+    read -n 1 -s -r -p "按任意键返回主菜单..."
+    main_menu
+}
 
-    # 提示用户按任意键返回主菜单
+# 启用积分监控
+function start_points_monitor() {
+    echo "启动积分监控..."
+    cat > /root/points_monitor.sh << 'EOL'
+#!/bin/bash
+LOG_FILE="/root/aios-cli.log"
+SCREEN_NAME="hyper"
+LAST_POINTS=0
+MIN_RESTART_INTERVAL=300
+
+while true; do
+    CURRENT_POINTS=$(aios-cli hive points | grep -o '[0-9]\+' || echo "0")
+    if [ "$CURRENT_POINTS" -eq "$LAST_POINTS" ]; then
+        echo "$(date): 积分没有增加，正在重启服务..." >> /root/points_monitor.log
+        screen -S "$SCREEN_NAME" -X stuff $'\003'
+        sleep 5
+        screen -S "$SCREEN_NAME" -X stuff "aios-cli kill\n"
+        sleep 5
+        echo "$(date): 清理旧日志..." > "$LOG_FILE"
+        screen -S "$SCREEN_NAME" -X stuff "aios-cli start --connect >> /root/aios-cli.log 2>&1\n"
+        LAST_POINTS=$CURRENT_POINTS
+    else
+        LAST_POINTS=$CURRENT_POINTS
+    fi
+    sleep 7200
+done
+EOL
+
+    chmod +x /root/points_monitor.sh
+    nohup /root/points_monitor.sh > /root/points_monitor.log 2>&1 &
+    echo "积分监控已启动，后台运行中。"
+    echo "可以通过查看 /root/points_monitor.log 来检查监控状态"
+    sleep 2
+    read -n 1 -s -r -p "按任意键返回主菜单..."
+    main_menu
+}
+
+# 启用每小时积分记录
+function start_hourly_points_record() {
+    echo "启动每小时积分记录..."
+    cat > /root/hourly_points.sh << 'EOL'
+#!/bin/bash
+POINTS_HISTORY_LOG="/root/points_history.log"
+
+if [ ! -f "$POINTS_HISTORY_LOG" ]; then
+    echo "时间,积分" > "$POINTS_HISTORY_LOG"
+fi
+
+while true; do
+    CURRENT_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+    CURRENT_POINTS=$(aios-cli hive points | grep -o '[0-9]\+' || echo "无法获取")
+    echo "$CURRENT_TIME,$CURRENT_POINTS" >> "$POINTS_HISTORY_LOG"
+    echo "$CURRENT_TIME: 已记录积分: $CURRENT_POINTS"
+    sleep 3600
+done
+EOL
+
+    chmod +x /root/hourly_points.sh
+    nohup /root/hourly_points.sh > /root/hourly_points_record.log 2>&1 &
+    echo "每小时积分记录已启动，后台运行中。"
+    echo "积分数据将保存到: $POINTS_HISTORY_LOG"
+    echo "可以通过查看 /root/hourly_points_record.log 检查运行状态"
+    sleep 2
     read -n 1 -s -r -p "按任意键返回主菜单..."
     main_menu
 }
