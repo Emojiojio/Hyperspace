@@ -2,8 +2,17 @@
 
 # 脚本保存路径
 SCRIPT_PATH="$HOME/Hyperspace.sh"
-# 积分历史日志文件路径
 POINTS_HISTORY_LOG="/root/points_history.log"
+
+# 如果传入 "stopall" 参数，终止所有监控
+if [ "$1" == "stopall" ]; then
+    echo "正在终止所有监控进程..."
+    pkill -f monitor.sh 2>/dev/null
+    pkill -f points_monitor.sh 2>/dev/null
+    pkill -f hourly_points.sh 2>/dev/null
+    echo "所有监控进程已停止"
+    exit 0
+fi
 
 # 检查并安装 screen
 function check_and_install_screen() {
@@ -15,7 +24,7 @@ function check_and_install_screen() {
     fi
 }
 
-# 主菜单函数
+# 主菜单函数（新增停止所有监控选项）
 function main_menu() {
     while true; do
         clear
@@ -33,9 +42,10 @@ function main_menu() {
         echo "7. 查看aios daemon状态"
         echo "8. 启用积分监控"
         echo "9. 启用每小时积分记录"
-        echo "10. 退出脚本"
+        echo "10. 停止所有监控"  # 新增选项
+        echo "11. 退出脚本"      # 原10改为11
         echo "================================================================"
-        read -p "请输入选择 (1-10): " choice
+        read -p "请输入选择 (1-11): " choice
 
         case $choice in
             1)  deploy_hyperspace_node ;;
@@ -47,7 +57,8 @@ function main_menu() {
             7)  view_status ;;
             8)  start_points_monitor ;;
             9)  start_hourly_points_record ;;
-            10) exit_script ;;
+            10) stop_all_monitors ;;  # 新增选项处理
+            11) exit_script ;;
             *)  echo "无效选择，请重新输入！"; sleep 2 ;;
         esac
     done
@@ -171,7 +182,7 @@ function view_logs() {
     main_menu
 }
 
-# 查看积分（显示最近10次记录）
+# 查看积分
 function view_points() {
     echo "正在查看当前积分..."
     source /root/.bashrc
@@ -202,6 +213,9 @@ function delete_node() {
 # 启用日志监控
 function start_log_monitor() {
     echo "启动日志监控..."
+    pkill -f monitor.sh 2>/dev/null
+    sleep 2
+
     cat > /root/monitor.sh << 'EOL'
 #!/bin/bash
 LOG_FILE="/root/aios-cli.log"
@@ -262,6 +276,9 @@ function view_status() {
 # 启用积分监控
 function start_points_monitor() {
     echo "启动积分监控..."
+    pkill -f points_monitor.sh 2>/dev/null
+    sleep 2
+
     cat > /root/points_monitor.sh << 'EOL'
 #!/bin/bash
 LOG_FILE="/root/aios-cli.log"
@@ -296,9 +313,12 @@ EOL
     main_menu
 }
 
-# 启用每小时积分记录（只保留时间和Points）
+# 启用每小时积分记录
 function start_hourly_points_record() {
     echo "启动每小时积分记录..."
+    pkill -f hourly_points.sh 2>/dev/null
+    sleep 2
+
     cat > /root/hourly_points.sh << 'EOL'
 #!/bin/bash
 POINTS_HISTORY_LOG="/root/points_history.log"
@@ -309,7 +329,6 @@ fi
 
 while true; do
     CURRENT_TIME=$(date '+%Y-%m-%d %H:%M:%S')
-    # 只提取 Points 的值
     CURRENT_POINTS=$(aios-cli hive points | grep "Points" | awk '{print $2}' || echo "无法获取")
     echo "$CURRENT_TIME,$CURRENT_POINTS" >> "$POINTS_HISTORY_LOG"
     echo "$CURRENT_TIME: 已记录积分: $CURRENT_POINTS"
@@ -322,6 +341,18 @@ EOL
     echo "每小时积分记录已启动，后台运行中。"
     echo "积分数据将保存到: $POINTS_HISTORY_LOG"
     echo "可以通过查看 /root/hourly_points_record.log 检查运行状态"
+    sleep 2
+    read -n 1 -s -r -p "按任意键返回主菜单..."
+    main_menu
+}
+
+# 停止所有监控（新增功能）
+function stop_all_monitors() {
+    echo "正在终止所有监控进程..."
+    pkill -f monitor.sh 2>/dev/null
+    pkill -f points_monitor.sh 2>/dev/null
+    pkill -f hourly_points.sh 2>/dev/null
+    echo "所有监控进程已停止"
     sleep 2
     read -n 1 -s -r -p "按任意键返回主菜单..."
     main_menu
