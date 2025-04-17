@@ -127,7 +127,7 @@ function deploy_hyperspace_node() {
     /root/.aios/aios-cli hive import-keys ./my.pem
     sleep 5
 
-    model="hf:TheBloke/phi-2-GGUF:phi-2.Q4_K_M.gguf"
+    model="hf:Qwen/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
     echo "正在通过命令 '/root/.aios/aios-cli models add' 添加模型..."
     while true; do
         if /root/.aios/aios-cli models add "$model"; then
